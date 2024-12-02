@@ -6,6 +6,11 @@
 
 #include "cpuid_ex.h"
 
+#define OUTPUT_OCTAL 3
+#define OUTPUT_BINARY 2
+#define OUTPUT_DECIMAL 1
+#define OUTPUT_HEX 0
+
 long myAtoi(char* str) {
 	char* endptr;
 	int base = 10;
@@ -38,17 +43,20 @@ void showHelp() {
 	printf("DESCRIPTION\n");
 	printf("	FUNCTION CODE\n");
 	printf("		Specifies the CPUID function (EAX) to call.\n");
-	printf("		This must be less than the maximum valid function for this CPU\n");
-	printf("		unless the ignore option is specified.\n");
+	printf("		This must be less than the maximum valid function code for this CPU\n");
+	printf("		and mode, unless the ignore option is specified.\n");
 	printf("	SUBFUNCTION CODE\n");
 	printf("		Specifies the CPUID subfunction (ECX) to call. Defaults to 0 if not specified.\n");
 	printf("	Either code can be specified in hexadecimal, rather than decimal, using the \'0x\' prefix.\n");
 	printf("	OPTIONS\n");
 	printf("		One or more of the following options:\n");
 	printf("			-(a)scii	: Show ASCII string conversions. Little-endian byte order.\n");
+	printf("			-(b)inary	: Show output in base 2 (binary). Incompatible with similar options.\n");
 	printf("			-(c)lean 	: Clean output, values only. Incompatible with other options.\n");
+	printf("			-(d)ecimal	: Show output in base 10 (decimal). Incompatible with similar options.\n");
 	printf("			-(h)elp		: Displays this message.\n");
 	printf("			-(i)gnore	: Ignores invalid or out of range function codes.\n");
+	printf("			-(o)ctal	: Show output in base 8 (octal). Incompatible with similar options.\n");
 	printf("			-(v)erbose	: Enables verbose output.\n");
 	printf("			-?			: Displays this message.\n");
 	printf("EXAMPLES\n");
@@ -58,12 +66,26 @@ void showHelp() {
 	printf("		Returns extended feature flags in the EDX. Function: 7, Subfunction: 2\n");
 }
 
-void showReg(int reg, char* name, int verbose, int clean, int ascii, int noNewLine) {
+void showReg(int reg, char* name, int verbose, int clean, int ascii, int noNewLine, int outputMode) {
 	if (verbose)
 		printf("	");
 	if (!clean)
-		printf("%s: 0x", name);
-	printf("%08x", reg);
+		printf("%s: ", name);
+
+	switch (outputMode) {
+		case OUTPUT_HEX:
+			printf("%08x", reg); break;
+		case OUTPUT_DECIMAL:
+			printf("%010d", reg); break;
+		case OUTPUT_OCTAL:
+			printf("%011o", reg); break;
+		case OUTPUT_BINARY:
+			for (int i = sizeof(int) * 8 - 1; i >= 0; i--) {
+				printf("%d", (reg >> i) & 1);
+			}
+			break;
+	}
+
 	if (ascii) {
 		char regStr[5];
 		regStr[3] = (reg >> 24) & 0xFF;
@@ -78,15 +100,15 @@ void showReg(int reg, char* name, int verbose, int clean, int ascii, int noNewLi
 		printf("\n");
 }
 
-void printRegs(cpuid_regs* regs, int clean, int ascii, int verbose) {
+void printRegs(cpuid_regs* regs, int clean, int ascii, int verbose, int outputMode) {
 	if (verbose) {
 		printf("CPUID call successful.\n");
 		printf("Registers:\n");
 	}
-	showReg(regs->eax, "EAX", verbose, clean, ascii, 0);
-	showReg(regs->ebx, "EBX", verbose, clean, ascii, 0);
-	showReg(regs->ecx, "ECX", verbose, clean, ascii, 0);
-	showReg(regs->edx, "EDX", verbose, clean, ascii, (clean) ? 1 : 0);
+	showReg(regs->eax, "EAX", verbose, clean, ascii, 0, outputMode);
+	showReg(regs->ebx, "EBX", verbose, clean, ascii, 0, outputMode);
+	showReg(regs->ecx, "ECX", verbose, clean, ascii, 0, outputMode);
+	showReg(regs->edx, "EDX", verbose, clean, ascii, (clean) ? 1 : 0, outputMode);
 }
 
 void toUpperCase(char* str) {
@@ -108,7 +130,8 @@ int main(int argc, char* argv[]) {
 	int ascii = 0;
 	int verbose = 0;
 	int ignore = 0;
-	
+	int outputMode = OUTPUT_HEX;	
+
 	// Indicies of codes in the argument array
 	int functionCode = -1;
 	int subfunctionCode = -1;
@@ -166,6 +189,27 @@ int main(int argc, char* argv[]) {
 				showHelp();
 				return 1;
 			}
+			else if (!strcmp(s, "D") || !strcmp(s, "DECIMAL")) {
+				if (outputMode != OUTPUT_HEX) {
+					printf("Decimal output overrides other output modes!\n");
+					return 1;
+				}
+				outputMode = OUTPUT_DECIMAL;
+			}
+			else if (!strcmp(s, "O") || !strcmp(s, "OCTAL")) {
+				if (outputMode != OUTPUT_HEX) {
+					printf("Octal output overrides other output modes!\n");
+					return 1;
+				}
+				outputMode = OUTPUT_OCTAL;
+			}
+			else if (!strcmp(s, "B") || !strcmp(s, "BINARY")) {
+				if (outputMode != OUTPUT_HEX) {
+					printf("Binary output overrides other output modes!\n");
+					return 1;
+				}
+				outputMode = OUTPUT_BINARY;
+			}
 			else if (verbose) {
 				printf("Ignoring unknown argument \"%s\".\n", argv[i]);
 			}
@@ -189,23 +233,41 @@ int main(int argc, char* argv[]) {
 	
 	uint32_t subcode = ((subfunctionCode == -1) ? 0 : (uint32_t)myAtoi(argv[subfunctionCode]));
 	if (subcode == -1) {
-		printf("Invalid subfunction code code \"%s\"!\n", argv[1]);
+		printf("Invalid subfunction code \"%s\"!\n", argv[1]);
 		return 1;
 	}
 	
 	if (verbose) {
 		printf("Setting subfunction code to 0x%x...\n", subcode);
-		printf("Retrieving maximum function code for this CPU...\n");
+		printf("Retrieving maximum basic function code for this CPU...\n");
 	}
 	
 	cpuid_regs regs = {};
 	cpuid(0, &regs);
 	
 	if (verbose)
-		printf("Maximum function code is 0x%x.\n", regs.eax);
+		printf("Maximum basic function code is 0x%x.\n", regs.eax);
 	
-	if (code >= regs.eax && !ignore) {
-		printf("Function code must be less than 0x%x!\n", regs.eax);
+	if (code >= regs.eax && !ignore && !(code >> 31)) {
+		printf("Basic function code must be less than 0x%x!\n", regs.eax);
+		return 1;
+	}
+	
+	regs.eax = 0;
+	regs.ebx = 0;
+	regs.ecx = 0;
+	regs.edx = 0;
+	
+	if (verbose)
+		printf("Retrieving maximum extended function code for this CPU...\n");
+	
+	cpuid(0x80000000, &regs);
+	
+	if (verbose)
+		printf("Maximum extended function code is 0x%x.\n", regs.eax);
+	
+	if (code >= regs.eax && !ignore && (code >> 31)) {
+		printf("Extended function code must be less than 0x%x!\n", regs.eax);
 		return 1;
 	}
 	
@@ -219,7 +281,7 @@ int main(int argc, char* argv[]) {
 	
 	cpuidex(code, subcode, &regs);
 	
-	printRegs(&regs, clean, ascii, verbose);
+	printRegs(&regs, clean, ascii, verbose, outputMode);
 	
 	if (verbose)
 		printf("Done.");

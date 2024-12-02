@@ -12,8 +12,8 @@ extern "C" void cpuid(uint32_t code, cpuid_regs* regs) {
 	__cpuid(cpuInfo, code);
 	regs->eax = cpuInfo[0];
 	regs->ebx = cpuInfo[1];
-	regs->ecx = cpuInfo[3];
-	regs->edx = cpuInfo[4];
+	regs->ecx = cpuInfo[2];
+	regs->edx = cpuInfo[3];
 #elif defined(__GNUC__) || defined(__clang__)
 	#if defined(__x86_64__)
 		__asm__ volatile(
